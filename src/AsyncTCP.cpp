@@ -157,6 +157,8 @@ static void _handle_async_event(lwip_event_packet_t * e){
         //ets_printf("event arg == NULL: 0x%08x\n", e->recv.pcb);
     } else if(e->event == LWIP_TCP_CLEAR){
         _remove_events_with_arg(e->arg);
+        // FIXME: Is this a double-free without the return?
+        return;
     } else if(e->event == LWIP_TCP_RECV){
         //ets_printf("-R: 0x%08x\n", e->recv.pcb);
         AsyncClient::_s_recv(e->arg, e->recv.pcb, e->recv.pb, e->recv.err);
@@ -182,7 +184,7 @@ static void _handle_async_event(lwip_event_packet_t * e){
         //ets_printf("D: 0x%08x %s = %s\n", e->arg, e->dns.name, ipaddr_ntoa(&e->dns.addr));
         AsyncClient::_s_dns_found(e->dns.name, &e->dns.addr, e->arg);
     }
-    free((void*)(e));
+    free(e);
 }
 
 static void _async_service_task(void *pvParameters){
@@ -201,6 +203,7 @@ static void _async_service_task(void *pvParameters){
             }
 #endif
         }
+        
     }
     vTaskDelete(NULL);
     _async_service_task_handle = NULL;
@@ -255,7 +258,7 @@ static int8_t _tcp_connected(void * arg, tcp_pcb * pcb, int8_t err) {
 
 static int8_t _tcp_poll(void * arg, struct tcp_pcb * pcb) {
     //ets_printf("+P: 0x%08x\n", pcb);
-    lwip_event_packet_t * e = (lwip_event_packet_t *)malloc(sizeof(lwip_event_packet_t));
+    lwip_event_packet_t * e = (lwip_event_packet_t *)malloc(sizeof(*e));
     e->event = LWIP_TCP_POLL;
     e->arg = arg;
     e->poll.pcb = pcb;
