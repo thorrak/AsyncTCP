@@ -196,6 +196,14 @@ class AsyncServer {
     void setNoDelay(bool nodelay);
     bool getNoDelay();
     uint8_t status();
+    /** Lock server event-queue to allow async events from different tasks
+     * 
+     * This is used to prevent concurrent access of non-thread-safe
+     * TCP functions from async_tcp task and application task.
+     * Used by AsyncEventSource.
+     */
+    bool lock() const;
+    void unlock() const;
 
     //Do not use any of the functions below!
     static int8_t _s_accept(void *arg, tcp_pcb* newpcb, int8_t err);
@@ -208,6 +216,8 @@ class AsyncServer {
     tcp_pcb* _pcb;
     AcConnectHandler _connect_cb;
     void* _connect_cb_arg;
+    // Lock for server event queue
+    SemaphoreHandle_t _server_lock;
 
     int8_t _accept(tcp_pcb* newpcb, int8_t err);
     int8_t _accepted(AsyncClient* client);

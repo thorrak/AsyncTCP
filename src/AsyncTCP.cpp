@@ -157,6 +157,8 @@ static void _handle_async_event(lwip_event_packet_t * e){
         //ets_printf("event arg == NULL: 0x%08x\n", e->recv.pcb);
     } else if(e->event == LWIP_TCP_CLEAR){
         _remove_events_with_arg(e->arg);
+        // FIXME: Is this a double-free without the return?
+        //return;
     } else if(e->event == LWIP_TCP_RECV){
         //ets_printf("-R: 0x%08x\n", e->recv.pcb);
         AsyncClient::_s_recv(e->arg, e->recv.pcb, e->recv.pb, e->recv.err);
@@ -201,6 +203,7 @@ static void _async_service_task(void *pvParameters){
             }
 #endif
         }
+
     }
     vTaskDelete(NULL);
     _async_service_task_handle = NULL;
@@ -255,10 +258,13 @@ static int8_t _tcp_connected(void * arg, tcp_pcb * pcb, int8_t err) {
 
 static int8_t _tcp_poll(void * arg, struct tcp_pcb * pcb) {
     //ets_printf("+P: 0x%08x\n", pcb);
-    lwip_event_packet_t * e = (lwip_event_packet_t *)malloc(sizeof(lwip_event_packet_t));
+    lwip_event_packet_t * e = (lwip_event_packet_t *)malloc(sizeof(*e));
     e->event = LWIP_TCP_POLL;
     e->arg = arg;
     e->poll.pcb = pcb;
+    // FIXME deadlock
+    free(e);
+    return ERR_OK;
     if (!_send_async_event(&e)) {
         free((void*)(e));
     }
@@ -1241,7 +1247,10 @@ AsyncServer::AsyncServer(IPAddress addr, uint16_t port)
 , _pcb(0)
 , _connect_cb(0)
 , _connect_cb_arg(0)
-{}
+{
+    _server_lock = xSemaphoreCreateBinary();
+    xSemaphoreGive(_server_lock);
+}
 
 AsyncServer::AsyncServer(uint16_t port)
 : _port(port)
@@ -1346,6 +1355,15 @@ uint8_t AsyncServer::status(){
         return 0;
     }
     return _pcb->state;
+}
+
+bool AsyncServer::lock() const {
+    xSemaphoreTake(_server_lock, portMAX_DELAY);
+    return true;
+}
+
+void AsyncServer::unlock() const {
+    xSemaphoreGive(_server_lock);
 }
 
 int8_t AsyncServer::_s_accept(void * arg, tcp_pcb * pcb, int8_t err){
