@@ -203,7 +203,7 @@ static void _async_service_task(void *pvParameters){
             }
 #endif
         }
-        
+
     }
     vTaskDelete(NULL);
     _async_service_task_handle = NULL;
@@ -1247,7 +1247,10 @@ AsyncServer::AsyncServer(IPAddress addr, uint16_t port)
 , _pcb(0)
 , _connect_cb(0)
 , _connect_cb_arg(0)
-{}
+{
+    _server_lock = xSemaphoreCreateBinary();
+    xSemaphoreGive(_server_lock);
+}
 
 AsyncServer::AsyncServer(uint16_t port)
 : _port(port)
@@ -1352,6 +1355,15 @@ uint8_t AsyncServer::status(){
         return 0;
     }
     return _pcb->state;
+}
+
+bool AsyncServer::lock() const {
+    xSemaphoreTake(_server_lock, portMAX_DELAY);
+    return true;
+}
+
+void AsyncServer::unlock() const {
+    xSemaphoreGive(_server_lock);
 }
 
 int8_t AsyncServer::_s_accept(void * arg, tcp_pcb * pcb, int8_t err){
