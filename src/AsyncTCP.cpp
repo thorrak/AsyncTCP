@@ -79,6 +79,8 @@ typedef struct {
 static xQueueHandle _async_queue;
 static TaskHandle_t _async_service_task_handle = NULL;
 
+// Lock for server event-queue to allow async events from different tasks
+SemaphoreHandle_t g_async_tcp_task_lock = xSemaphoreCreateBinary();
 
 SemaphoreHandle_t _slots_lock;
 const int _number_of_closed_slots = CONFIG_LWIP_MAX_ACTIVE_TCP;
@@ -196,7 +198,10 @@ static void _async_service_task(void *pvParameters){
                 log_e("Failed to add async task to WDT");
             }
 #endif
+            xSemaphoreTake(g_async_tcp_task_lock, portMAX_DELAY);
             _handle_async_event(packet);
+            xSemaphoreGive(g_async_tcp_task_lock);
+
 #if CONFIG_ASYNC_TCP_USE_WDT
             if(esp_task_wdt_delete(NULL) != ESP_OK){
                 log_e("Failed to remove loop task from WDT");
@@ -1248,8 +1253,7 @@ AsyncServer::AsyncServer(IPAddress addr, uint16_t port)
 , _connect_cb(0)
 , _connect_cb_arg(0)
 {
-    _server_lock = xSemaphoreCreateBinary();
-    xSemaphoreGive(_server_lock);
+    xSemaphoreGive(g_async_tcp_task_lock);
 }
 
 AsyncServer::AsyncServer(uint16_t port)
@@ -1259,7 +1263,9 @@ AsyncServer::AsyncServer(uint16_t port)
 , _pcb(0)
 , _connect_cb(0)
 , _connect_cb_arg(0)
-{}
+{
+    xSemaphoreGive(g_async_tcp_task_lock);
+}
 
 AsyncServer::~AsyncServer(){
     end();
@@ -1358,12 +1364,12 @@ uint8_t AsyncServer::status(){
 }
 
 bool AsyncServer::lock() const {
-    xSemaphoreTake(_server_lock, portMAX_DELAY);
+    xSemaphoreTake(g_async_tcp_task_lock, portMAX_DELAY);
     return true;
 }
 
 void AsyncServer::unlock() const {
-    xSemaphoreGive(_server_lock);
+    xSemaphoreGive(g_async_tcp_task_lock);
 }
 
 int8_t AsyncServer::_s_accept(void * arg, tcp_pcb * pcb, int8_t err){

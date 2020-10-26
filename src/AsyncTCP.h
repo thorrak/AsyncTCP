@@ -36,6 +36,8 @@ extern "C" {
 #define CONFIG_ASYNC_TCP_USE_WDT 1 //if enabled, adds between 33us and 200us per event
 #endif
 
+extern SemaphoreHandle_t g_async_tcp_task_lock;
+
 class AsyncClient;
 
 #define ASYNC_MAX_ACK_TIME 5000
@@ -216,8 +218,6 @@ class AsyncServer {
     tcp_pcb* _pcb;
     AcConnectHandler _connect_cb;
     void* _connect_cb_arg;
-    // Lock for server event queue
-    SemaphoreHandle_t _server_lock;
 
     int8_t _accept(tcp_pcb* newpcb, int8_t err);
     int8_t _accepted(AsyncClient* client);
