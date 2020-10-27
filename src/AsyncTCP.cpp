@@ -209,12 +209,12 @@ static void _async_service_task(void *pvParameters){
 #endif
         }
 
-    }
+    } // for(;;)
     vTaskDelete(NULL);
     _async_service_task_handle = NULL;
 }
 /*
-static void _stop_async_task(){
+static void _stop_async_task(){k
     if(_async_service_task_handle){
         vTaskDelete(_async_service_task_handle);
         _async_service_task_handle = NULL;
