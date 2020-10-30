@@ -160,7 +160,7 @@ static void _handle_async_event(lwip_event_packet_t * e){
     } else if(e->event == LWIP_TCP_CLEAR){
         _remove_events_with_arg(e->arg);
         // FIXME: Is this a double-free without the return?
-        //return;
+        return;
     } else if(e->event == LWIP_TCP_RECV){
         //ets_printf("-R: 0x%08x\n", e->recv.pcb);
         AsyncClient::_s_recv(e->arg, e->recv.pcb, e->recv.pb, e->recv.err);
@@ -214,7 +214,7 @@ static void _async_service_task(void *pvParameters){
     _async_service_task_handle = NULL;
 }
 /*
-static void _stop_async_task(){k
+static void _stop_async_task(){
     if(_async_service_task_handle){
         vTaskDelete(_async_service_task_handle);
         _async_service_task_handle = NULL;
@@ -268,8 +268,8 @@ static int8_t _tcp_poll(void * arg, struct tcp_pcb * pcb) {
     e->arg = arg;
     e->poll.pcb = pcb;
     // FIXME deadlock
-    free(e);
-    return ERR_OK;
+    //free(e);
+    //return ERR_OK;
     if (!_send_async_event(&e)) {
         free((void*)(e));
     }
