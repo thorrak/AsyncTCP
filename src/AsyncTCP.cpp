@@ -36,7 +36,7 @@ extern "C"{
  * */
 
 typedef enum {
-    LWIP_TCP_SENT, LWIP_TCP_RECV, LWIP_TCP_FIN, LWIP_TCP_ERROR, LWIP_TCP_POLL, LWIP_TCP_CLEAR, LWIP_TCP_ACCEPT, LWIP_TCP_CONNECTED, LWIP_TCP_DNS
+    LWIP_TCP_SENT, LWIP_TCP_RECV, LWIP_TCP_FIN, LWIP_TCP_ERROR, LWIP_TCP_POLL, LWIP_TCP_CLEAR, LWIP_TCP_ACCEPT, LWIP_TCP_CONNECTED, LWIP_TCP_DNS, ASYNC_TCP_PUSH
 } lwip_event_t;
 
 typedef struct {
@@ -73,6 +73,10 @@ typedef struct {
                         const char * name;
                         ip_addr_t addr;
                 } dns;
+                struct {
+                        const char * buf; // Message buffer for push message
+                        const size_t len; // length of message buffer
+                } async_tcp_push;
         };
 } lwip_event_packet_t;
 
@@ -784,6 +788,27 @@ bool AsyncClient::send(){
     return false;
 }
 
+/** Push a new data message to the front of the async event queue.
+ * 
+ * The data is then sent as soon as possible from the event loop running in
+ * the async_tcp task.
+ * This method is (supposed to be) finally safe to be called from other tasks.
+ * The sse_msg_buf must be heap-allocated, it is freed by the AsyncClient
+ * when the message is sent or on timeout.
+ */
+bool AsyncClient::send_threadsafe(const char* sse_msg_buf, const size_t sse_msg_buf_len){
+    lwip_event_packet_t * e = (lwip_event_packet_t *)malloc(sizeof(*e));
+    e->event = ASYNC_TCP_PUSH;
+    e->arg = this;
+    e->async_tcp_push.buf = sse_msg_buf;
+    e->async_tcp_push.len = sse_msg_buf_len;
+    if (!_prepend_async_event(&e)) {
+        free(e);
+    }
+    // FIXME: Preliminary does not care if message is actually sent
+    return true;
+}
+
 size_t AsyncClient::ack(size_t len){
     if(len > _rx_ack_len)
         len = _rx_ack_len;
@@ -855,6 +880,16 @@ void AsyncClient::_free_closed_slot(){
 /*
  * Private Callbacks
  * */
+
+bool AsyncClient::_push_message(const char *buf, const size_t len){
+    // Calls tcp_write(): Write data for sending (but does not send it immediately)
+    size_t sent = add((const char *)_data, len);
+    if(canSend())
+        // Calls tcp_output(): Find out what we can send and send it
+        send();
+    _sent += sent;
+    return sent == strlen(buf);
+}
 
 int8_t AsyncClient::_connected(void* pcb, int8_t err){
     _pcb = reinterpret_cast<tcp_pcb*>(pcb);
@@ -1239,6 +1274,10 @@ void AsyncClient::_s_error(void * arg, int8_t err) {
 
 int8_t AsyncClient::_s_connected(void * arg, void * pcb, int8_t err){
     return reinterpret_cast<AsyncClient*>(arg)->_connected(pcb, err);
+}
+
+bool AsyncClient::_s_push_message(void * arg, const char *buf, const size_t len){
+    return reinterpret_cast<AsyncClient*>(arg)->_push_message(buf, len);
 }
 
 /*

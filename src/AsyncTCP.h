@@ -78,6 +78,15 @@ class AsyncClient {
     size_t space();//space available in the TCP window
     size_t add(const char* data, size_t size, uint8_t apiflags=ASYNC_WRITE_FLAG_COPY);//add for sending
     bool send();//send all data added with the method above
+    /** Push a new data message to the front of the async event queue.
+     * 
+     * The data is then sent as soon as possible from the event loop running in
+     * the async_tcp task.
+     * This method is (supposed to be) finally safe to be called from other tasks.
+     * The sse_msg_buf must be heap-allocated, it is freed by the AsyncClient
+     * when the message is sent or on timeout.
+     */
+    bool send_threadsafe(const char* sse_msg_buf, const size_t sse_msg_buf_len);
 
     //write equals add()+send()
     size_t write(const char* data);
