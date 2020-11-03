@@ -36,6 +36,8 @@ extern "C" {
 #define CONFIG_ASYNC_TCP_USE_WDT 1 //if enabled, adds between 33us and 200us per event
 #endif
 
+extern SemaphoreHandle_t g_async_tcp_task_lock;
+
 class AsyncClient;
 
 #define ASYNC_MAX_ACK_TIME 5000
@@ -76,6 +78,15 @@ class AsyncClient {
     size_t space();//space available in the TCP window
     size_t add(const char* data, size_t size, uint8_t apiflags=ASYNC_WRITE_FLAG_COPY);//add for sending
     bool send();//send all data added with the method above
+    /** Push a new data message to the front of the async event queue.
+     * 
+     * The data is then sent as soon as possible from the event loop running in
+     * the async_tcp task.
+     * This method is (supposed to be) finally safe to be called from other tasks.
+     * The sse_msg_buf must be heap-allocated, it is freed by the AsyncClient
+     * when the message is sent or on timeout.
+     */
+    bool send_threadsafe(const char* sse_msg_buf, const size_t buf_len);
 
     //write equals add()+send()
     size_t write(const char* data);
@@ -135,6 +146,7 @@ class AsyncClient {
     static int8_t _s_sent(void *arg, struct tcp_pcb *tpcb, uint16_t len);
     static int8_t _s_connected(void* arg, void* tpcb, int8_t err);
     static void _s_dns_found(const char *name, struct ip_addr *ipaddr, void *arg);
+    static bool _s_push_message(void *arg, const char *buf, const size_t len);
 
     int8_t _recv(tcp_pcb* pcb, pbuf* pb, int8_t err);
     tcp_pcb * pcb(){ return _pcb; }
@@ -172,6 +184,7 @@ class AsyncClient {
     int8_t _close();
     void _free_closed_slot();
     void _allocate_closed_slot();
+    bool _push_message(const char *buf, const size_t len);
     int8_t _connected(void* pcb, int8_t err);
     void _error(int8_t err);
     int8_t _poll(tcp_pcb* pcb);
@@ -196,6 +209,14 @@ class AsyncServer {
     void setNoDelay(bool nodelay);
     bool getNoDelay();
     uint8_t status();
+    /** Lock server event-queue to allow async events from different tasks
+     * 
+     * This is used to prevent concurrent access of non-thread-safe
+     * TCP functions from async_tcp task and application task.
+     * Used by AsyncEventSource.
+     */
+    bool lock() const;
+    void unlock() const;
 
     //Do not use any of the functions below!
     static int8_t _s_accept(void *arg, tcp_pcb* newpcb, int8_t err);
