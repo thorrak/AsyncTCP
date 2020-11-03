@@ -36,8 +36,6 @@ extern "C" {
 #define CONFIG_ASYNC_TCP_USE_WDT 1 //if enabled, adds between 33us and 200us per event
 #endif
 
-extern SemaphoreHandle_t g_async_tcp_task_lock;
-
 class AsyncClient;
 
 #define ASYNC_MAX_ACK_TIME 5000
@@ -209,14 +207,6 @@ class AsyncServer {
     void setNoDelay(bool nodelay);
     bool getNoDelay();
     uint8_t status();
-    /** Lock server event-queue to allow async events from different tasks
-     * 
-     * This is used to prevent concurrent access of non-thread-safe
-     * TCP functions from async_tcp task and application task.
-     * Used by AsyncEventSource.
-     */
-    bool lock() const;
-    void unlock() const;
 
     //Do not use any of the functions below!
     static int8_t _s_accept(void *arg, tcp_pcb* newpcb, int8_t err);
