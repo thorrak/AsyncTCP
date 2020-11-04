@@ -76,15 +76,14 @@ class AsyncClient {
     size_t space();//space available in the TCP window
     size_t add(const char* data, size_t size, uint8_t apiflags=ASYNC_WRITE_FLAG_COPY);//add for sending
     bool send();//send all data added with the method above
+
     /** Push a new data message to the front of the async event queue.
      * 
      * The data is then sent as soon as possible from the event loop running in
      * the async_tcp task.
      * This method is (supposed to be) finally safe to be called from other tasks.
-     * The sse_msg_buf must be heap-allocated, it is freed by the AsyncClient
-     * when the message is sent or on timeout.
      */
-    bool send_threadsafe(const char* sse_msg_buf, const size_t buf_len);
+    size_t write_threadsafe(const char* msg_buf, const size_t msg_len);
 
     //write equals add()+send()
     size_t write(const char* data);
@@ -144,7 +143,7 @@ class AsyncClient {
     static int8_t _s_sent(void *arg, struct tcp_pcb *tpcb, uint16_t len);
     static int8_t _s_connected(void* arg, void* tpcb, int8_t err);
     static void _s_dns_found(const char *name, struct ip_addr *ipaddr, void *arg);
-    static bool _s_push_message(void *arg, const char *buf, const size_t len);
+    static void _s_push_message(void *arg, const char *buf, const size_t len, size_t *chars_sent);
 
     int8_t _recv(tcp_pcb* pcb, pbuf* pb, int8_t err);
     tcp_pcb * pcb(){ return _pcb; }
@@ -182,7 +181,7 @@ class AsyncClient {
     int8_t _close();
     void _free_closed_slot();
     void _allocate_closed_slot();
-    bool _push_message(const char *buf, const size_t len);
+    void _push_message(const char *buf, const size_t len, size_t *p_chars_sent);
     int8_t _connected(void* pcb, int8_t err);
     void _error(int8_t err);
     int8_t _poll(tcp_pcb* pcb);

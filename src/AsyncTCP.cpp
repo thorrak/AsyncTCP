@@ -36,7 +36,7 @@ extern "C"{
  * */
 
 typedef enum {
-    LWIP_TCP_SENT, LWIP_TCP_RECV, LWIP_TCP_FIN, LWIP_TCP_ERROR, LWIP_TCP_POLL, LWIP_TCP_CLEAR, LWIP_TCP_ACCEPT, LWIP_TCP_CONNECTED, LWIP_TCP_DNS, ASYNC_TCP_PUSH
+    LWIP_TCP_SENT, LWIP_TCP_RECV, LWIP_TCP_FIN, LWIP_TCP_ERROR, LWIP_TCP_POLL, LWIP_TCP_CLEAR, LWIP_TCP_ACCEPT, LWIP_TCP_CONNECTED, LWIP_TCP_DNS, ASYNC_PUSH_MSG
 } lwip_event_t;
 
 typedef struct {
@@ -74,9 +74,14 @@ typedef struct {
                         ip_addr_t addr;
                 } dns;
                 struct {
-                        const char * buf; // Message buffer for push message
-                        size_t len; // length of message buffer
-                } async_tcp_push;
+                        // Message buffer for push message
+                        const char * buf;
+                        // Nessage length
+                        size_t len;
+                        // Number of sent characters returned into pointer
+                        // as the event is freed before we can read the value
+                        size_t *p_chars_sent;
+                } push_msg;
         };
 } lwip_event_packet_t;
 
@@ -187,6 +192,9 @@ static void _handle_async_event(lwip_event_packet_t * e){
     } else if(e->event == LWIP_TCP_DNS){
         //ets_printf("D: 0x%08x %s = %s\n", e->arg, e->dns.name, ipaddr_ntoa(&e->dns.addr));
         AsyncClient::_s_dns_found(e->dns.name, &e->dns.addr, e->arg);
+    } else if(e->event == ASYNC_PUSH_MSG){
+        //ets_printf("D: arg: 0x%08x  buf: 0x%08x  buf_len: %d  chars_sent: %d\n", e->arg, e->push_msg.buf, e->push_msg.len, *e->push_msg.p_chars_sent);
+        AsyncClient::_s_push_message(e->arg, e->push_msg.buf, e->push_msg.len, e->push_msg.p_chars_sent);
     }
     free(e);
 }
@@ -242,7 +250,7 @@ static int8_t _tcp_clear_events(void * arg) {
     e->event = LWIP_TCP_CLEAR;
     e->arg = arg;
     if (!_prepend_async_event(&e)) {
-        free((void*)(e));
+        free(e);
     }
     return ERR_OK;
 }
@@ -267,7 +275,7 @@ static int8_t _tcp_poll(void * arg, struct tcp_pcb * pcb) {
     e->arg = arg;
     e->poll.pcb = pcb;
     if (!_send_async_event(&e)) {
-        free((void*)(e));
+        free(e);
     }
     return ERR_OK;
 }
@@ -290,7 +298,7 @@ static int8_t _tcp_recv(void * arg, struct tcp_pcb * pcb, struct pbuf *pb, int8_
         AsyncClient::_s_lwip_fin(e->arg, e->fin.pcb, e->fin.err);
     }
     if (!_send_async_event(&e)) {
-        free((void*)(e));
+        free(e);
     }
     return ERR_OK;
 }
@@ -303,7 +311,7 @@ static int8_t _tcp_sent(void * arg, struct tcp_pcb * pcb, uint16_t len) {
     e->sent.pcb = pcb;
     e->sent.len = len;
     if (!_send_async_event(&e)) {
-        free((void*)(e));
+        free(e);
     }
     return ERR_OK;
 }
@@ -315,7 +323,7 @@ static void _tcp_error(void * arg, int8_t err) {
     e->arg = arg;
     e->error.err = err;
     if (!_send_async_event(&e)) {
-        free((void*)(e));
+        free(e);
     }
 }
 
@@ -331,7 +339,7 @@ static void _tcp_dns_found(const char * name, struct ip_addr * ipaddr, void * ar
         memset(&e->dns.addr, 0, sizeof(e->dns.addr));
     }
     if (!_send_async_event(&e)) {
-        free((void*)(e));
+        free(e);
     }
 }
 
@@ -342,7 +350,7 @@ static int8_t _tcp_accept(void * arg, AsyncClient * client) {
     e->arg = arg;
     e->accept.client = client;
     if (!_prepend_async_event(&e)) {
-        free((void*)(e));
+        free(e);
     }
     return ERR_OK;
 }
@@ -785,20 +793,20 @@ bool AsyncClient::send(){
  * The data is then sent as soon as possible from the event loop running in
  * the async_tcp task.
  * This method is (supposed to be) finally safe to be called from other tasks.
- * The sse_msg_buf must be heap-allocated, it is freed by the AsyncClient
- * when the message is sent or on timeout.
  */
-bool AsyncClient::send_threadsafe(const char* sse_msg_buf, const size_t buf_len){
-//    lwip_event_packet_t * e = (lwip_event_packet_t *)malloc(sizeof(*e));
-//    e->event = ASYNC_TCP_PUSH;
-//    e->arg = this;
-//    e->async_tcp_push.buf = sse_msg_buf;
-//    e->async_tcp_push.len = buf_len;
-//    if (!_prepend_async_event(&e)) {
-//        free(e);
-//    }
-//    // FIXME: Preliminary does not care if message is actually sent
-    return true;
+size_t AsyncClient::write_threadsafe(const char *msg_buf, const size_t msg_len){
+    lwip_event_packet_t *e = (lwip_event_packet_t *)malloc(sizeof(*e));
+    size_t chars_sent = 0;
+    e->event = ASYNC_PUSH_MSG;
+    e->arg = this;
+    e->push_msg.buf = msg_buf;
+    e->push_msg.len = msg_len;
+    e->push_msg.p_chars_sent = &chars_sent;
+    if (!_prepend_async_event(&e)) {
+        ::free(e);
+        return 0;
+    }
+    return chars_sent;
 }
 
 size_t AsyncClient::ack(size_t len){
@@ -873,15 +881,16 @@ void AsyncClient::_free_closed_slot(){
  * Private Callbacks
  * */
 
-bool AsyncClient::_push_message(const char *buf, const size_t len){
-//    // Calls tcp_write(): Write data for sending (but does not send it immediately)
-//    size_t sent = add((const char *)_data, len);
-//    if(canSend())
-//        // Calls tcp_output(): Find out what we can send and send it
-//        send();
-//    _sent += sent;
-//    return sent == strlen(buf);
-    return true;
+void AsyncClient::_push_message(const char *buf, const size_t len, size_t *p_chars_sent){
+    size_t sndbuf_space = space();
+    if(sndbuf_space < len){
+        ets_printf("push_message fragmented! Space: %d,  Size: %d\n",
+                   sndbuf_space, len);
+        // This is zero-initialised already
+        // *p_chars_sent = 0;
+        //return;
+    }
+    *p_chars_sent = write(buf, len);
 }
 
 int8_t AsyncClient::_connected(void* pcb, int8_t err){
@@ -1269,8 +1278,8 @@ int8_t AsyncClient::_s_connected(void * arg, void * pcb, int8_t err){
     return reinterpret_cast<AsyncClient*>(arg)->_connected(pcb, err);
 }
 
-bool AsyncClient::_s_push_message(void * arg, const char *buf, const size_t len){
-    return reinterpret_cast<AsyncClient*>(arg)->_push_message(buf, len);
+void AsyncClient::_s_push_message(void *arg, const char *buf, const size_t len, size_t *p_chars_sent){
+    reinterpret_cast<AsyncClient*>(arg)->_push_message(buf, len, p_chars_sent);
 }
 
 /*
