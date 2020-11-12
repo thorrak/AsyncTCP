@@ -85,7 +85,10 @@ typedef struct {
         };
 } lwip_event_packet_t;
 
-static xQueueHandle _async_queue;
+static QueueHandle_t _async_queue;
+// Non-static queue handle for debug purposes only
+QueueHandle_t dbg_async_tcp_event_queue_handle;
+
 static TaskHandle_t _async_service_task_handle = NULL;
 
 
@@ -105,6 +108,7 @@ static uint32_t _closed_index = []() {
 static inline bool _init_async_event_queue(){
     if(!_async_queue){
         _async_queue = xQueueCreate(256, sizeof(lwip_event_packet_t *));
+        dbg_async_tcp_event_queue_handle = _async_queue;
         if(!_async_queue){
             return false;
         }
