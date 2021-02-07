@@ -118,7 +118,7 @@ static inline bool _init_async_event_queue(){
 
 static inline bool _send_async_event(lwip_event_packet_t ** e_buf){
 #ifdef ASYNCTCP_NO_PORTMAX
-    return _async_queue && xQueueSend(_async_queue, e, (TickType_t) 0x64) == pdPASS;
+    return _async_queue && xQueueSend(_async_queue, e_buf, (TickType_t) 0x64) == pdPASS;
 #else
     return _async_queue && xQueueSend(_async_queue, e_buf, portMAX_DELAY) == pdPASS;
 #endif
